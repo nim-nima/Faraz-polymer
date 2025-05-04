@@ -1,18 +1,164 @@
-
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>انبار من - Faraz Polymer</title>
-  <link rel="manifest" href="manifest.json" />
-  <meta name="theme-color" content="#1e88e5" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css" />
+  <meta charset="UTF-8">
+  <title>اپلیکیشن انبارداری شخصی</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: Tahoma, sans-serif; background: #f8f8f8; margin: 0; padding: 20px; }
+    h2, h3 { color: #2c3e50; margin: 0 0 10px; }
+    .section { background: #fff; padding: 15px; margin-top: 20px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    input, select, button { width: 100%; padding: 8px; margin: 5px 0; font-size: 1em; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+    button { background: #3498db; color: #fff; cursor: pointer; }
+    button:hover { background: #2980b9; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+    th { background: #eee; }
+    .low-stock { background: #fdd; }
+  </style>
 </head>
 <body>
-  <header>انبار من - Faraz Polymer</header>
-  <div class="container mt-4">
-    <p>نسخه کامل اپلیکیشن HTML بارگذاری شد.</p>
+
+  <h2>اپ «انبار من»</h2>
+
+  <!-- ثبت / ویرایش کالا -->
+  <div class="section">
+    <h3>ثبت / ویرایش کالا</h3>
+    <input id="code" placeholder="کد کالا">
+    <input id="retail" type="number" placeholder="قیمت خورده (تومان)">
+    <input id="wholesale" type="number" placeholder="قیمت کیسه‌ای (تومان)">
+    <button onclick="saveItem()">ذخیره کالا</button>
   </div>
+
+  <!-- ورود / خروج موجودی -->
+  <div class="section">
+    <h3>ورود / خروج موجودی</h3>
+    <input id="moveCode" placeholder="کد کالا">
+    <select id="moveType">
+      <option value="in">ورود</option>
+      <option value="out">خروج</option>
+    </select>
+    <input id="moveAmount" type="number" placeholder="تعداد کیسه">
+    <button onclick="moveStock()">ثبت ورود/خروج</button>
+  </div>
+
+  <!-- گزارش‌گیری با بازه تاریخی -->
+  <div class="section">
+    <h3>گزارش‌گیری</h3>
+    <label>نوع آیتم:</label>
+    <select id="filterType">
+      <option value="all">همه</option>
+      <option value="color">رنگ/مستربچ</option>
+      <option value="material">مواد اولیه</option>
+    </select>
+    <label>از تاریخ:</label>
+    <input id="fromDate" type="date">
+    <label>تا تاریخ:</label>
+    <input id="toDate" type="date">
+    <button onclick="generateReport()">نمایش گزارش</button>
+    <button onclick="downloadPDF()">دانلود PDF</button>
+    <div id="report"></div>
+  </div>
+
+  <!-- پشتیبان‌گیری -->
+  <div class="section">
+    <h3>پشتیبان‌گیری / بازیابی</h3>
+    <button onclick="backupData()">دریافت پشتیبان</button>
+    <input type="file" onchange="restoreData(event)">
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script>
+    const getToday = () => {
+      const d = new Date();
+      return new Intl.DateTimeFormat('fa-IR-u-ca-persian',{year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
+    };
+
+    function saveItem() {
+      const code = document.getElementById('code').value.trim();
+      const retail = document.getElementById('retail').value;
+      const wholesale = document.getElementById('wholesale').value;
+      if (!code) return alert("کد کالا را وارد کنید.");
+      let data = JSON.parse(localStorage.getItem('items')||'{}');
+      // حفظ موجودی قبلی
+      const prev = data[code]||{};
+      data[code] = {
+        code,
+        retail,
+        wholesale,
+        stock: prev.stock||0,
+        date: getToday(),
+        type: prev.type||'all'
+      };
+      localStorage.setItem('items', JSON.stringify(data));
+      alert("کالا ذخیره شد.");
+    }
+
+    function moveStock() {
+      const code = document.getElementById('moveCode').value.trim();
+      const type = document.getElementById('moveType').value;
+      const amount = parseInt(document.getElementById('moveAmount').value);
+      let data = JSON.parse(localStorage.getItem('items')||'{}');
+      if (!data[code]) return alert("کالا یافت نشد.");
+      data[code].stock = (data[code].stock||0) + (type==='in'?amount:-amount);
+      data[code].date = getToday();
+      localStorage.setItem('items', JSON.stringify(data));
+      alert("موجودی به‌روز شد.");
+    }
+
+    function generateReport() {
+      const typeFilter = document.getElementById('filterType').value;
+      const from = document.getElementById('fromDate').value;
+      const to = document.getElementById('toDate').value;
+      let data = JSON.parse(localStorage.getItem('items')||'{}');
+      let html = `<table><tr><th>کد</th><th>خورده</th><th>کیسه‌ای</th><th>موجودی</th><th>تاریخ</th></tr>`;
+      for (let code in data) {
+        const it = data[code];
+        // فیلتر نوع
+        if (typeFilter!=='all' && it.type!==typeFilter) continue;
+        // فیلتر بازه تاریخی
+        let d = it.date.split('/').reverse().join('-'); // yyyy-mm-dd
+        if ((from && d<from) || (to && d>to)) continue;
+        html += `<tr${it.stock<=0?' class="low-stock"':''}>
+          <td>${code}</td>
+          <td>${it.retail}</td>
+          <td>${it.wholesale}</td>
+          <td>${it.stock}</td>
+          <td>${it.date}</td>
+        </tr>`;
+      }
+      html += `</table>`;
+      document.getElementById('report').innerHTML = html;
+    }
+
+    function downloadPDF() {
+      generateReport();
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF('p','pt','a4');
+      doc.html(document.getElementById('report'),{
+        callback: d=>d.save('گزارش_انبار.pdf'),
+        x:20, y:20, width:560
+      });
+    }
+
+    function backupData() {
+      const data = localStorage.getItem('items')||'{}';
+      const blob = new Blob([data],{type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'backup.json';
+      a.click();
+    }
+
+    function restoreData(e) {
+      const f = e.target.files[0];
+      const r = new FileReader();
+      r.onload = ev=>{
+        localStorage.setItem('items', ev.target.result);
+        alert('بازیابی انجام شد.');
+      };
+      r.readAsText(f);
+    }
+  </script>
 </body>
 </html>
